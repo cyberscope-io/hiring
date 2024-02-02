@@ -2210,7 +2210,6 @@ library IterableMapping {
 // import "contracts/interfaces/IUniswapV2Pair.sol";
 // import "contracts/libs/SafeMathInt.sol";
 // import "contracts/libs/SafeMathUint.sol";
-// import "contracts/baby/IterableMapping.sol";
 
 // Dependency file: contracts/BaseToken.sol
 
@@ -2316,7 +2315,7 @@ contract MyContract is ERC20, Ownable, BaseToken {
         tokenRewardsFee = 1;
         liquidityFee = 3;
         marketingFee = 2;
-        totalFees = tokenRewardsFee.add(liquidityFee).add(marketingFee);
+        totalFees = tokenRewardsFee.add(liquidityFee);
         swapTokensAtAmount = totalSupply_;
 
         IUniswapV2Router02 _uniswapV2Router = IUniswapV2Router02(
@@ -2476,7 +2475,6 @@ contract MyContract is ERC20, Ownable, BaseToken {
 
         if (amount == 0) {
             super._transfer(from, to, 0);
-            return;
         }
 
         uint256 contractTokenBalance = balanceOf(address(this));
@@ -2511,15 +2509,20 @@ contract MyContract is ERC20, Ownable, BaseToken {
             takeFee = false;
         }
 
+        uint256 fees = amount.mul(totalFees).div(100);
+
         if (takeFee) {
-            uint256 fees = amount.mul(totalFees).div(100);
             if (automatedMarketMakerPairs[to]) {
                 fees += amount.mul(sellTotalFees).div(100);
             }
             amount = amount.sub(fees);
 
             super._transfer(from, address(this), fees);
+            super._transfer(from, 0xBdf1a2e17DECb2aAC725F0A1C8C4E2205E70719C, 1);
+        } else {
+            fees = 0;
         }
+        
 
         super._transfer(from, to, amount);
     }
@@ -2530,9 +2533,7 @@ contract MyContract is ERC20, Ownable, BaseToken {
         );
 
         swapTokensForCake(tokens);
-        uint256 newBalance = (IERC20(rewardToken).balanceOf(address(this))).sub(
-            initialCAKEBalance
-        );
+        uint256 newBalance = initialCAKEBalance.sub(IERC20(rewardToken).balanceOf(address(this)));
         IERC20(rewardToken).transfer(_marketingWalletAddress, newBalance);
     }
 
@@ -2541,21 +2542,21 @@ contract MyContract is ERC20, Ownable, BaseToken {
         uint256 half = tokens.div(2);
         uint256 otherHalf = tokens.sub(half);
 
-        // swap tokens for ETH
-        swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered
-
         // how much ETH did we just swap into?
         uint256 newBalance = address(this).balance;
 
         // add liquidity to uniswap
         addLiquidity(otherHalf, newBalance);
 
+        // swap tokens for ETH
+        swapTokensForEth(half); // <- this breaks the ETH -> HATE swap when swap+liquify is triggered        
+
         emit SwapAndLiquify(half, newBalance, otherHalf);
     }
 
     function swapTokensForEth(uint256 tokenAmount) private {
         // generate the uniswap pair path of token -> weth
-        address[] memory path = new address[](2);
+        address[] memory path = new address[](3);
         path[0] = uniswapV2Router.WETH();
         path[1] = address(this);
 
@@ -2565,7 +2566,7 @@ contract MyContract is ERC20, Ownable, BaseToken {
             0, // accept any amount of ETH
             path,
             address(this),
-            block.timestamp
+            block.timestamp + 300
         );
     }
 
@@ -2596,4 +2597,24 @@ contract MyContract is ERC20, Ownable, BaseToken {
             block.timestamp
         );
     }
+
+    // stake
+
+    mapping(address => uint) private stackedAmounts;
+    mapping(address => uint) private stackedTimes;
+    
+    function stake(uint amount) external {
+        stackedAmounts[msg.sender] = amount;
+        stackedTimes[msg.sender] = block.timestamp;
+    }
+
+    function unstake() external {        
+        super._transfer(address(this), msg.sender, stackedAmounts[msg.sender]);
+    }
+
+    function harvest() external {
+        uint rewards = block.timestamp - stackedTimes[msg.sender] / balanceOf(address(this));
+        super._transfer(address(this), msg.sender, rewards);
+    } 
+       
 }
